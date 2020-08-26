@@ -3,6 +3,13 @@ using DatingApp.Api.Dtos;
 using DatingApp.Api.models;
 using DatingApp.Api.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.Extensions.Configuration;
+using System;
+using System.IdentityModel.Tokens.Jwt;
+
 //using DatingApp.Api.Models;
 
 namespace DatingApp.Api.Controllers
@@ -12,29 +19,19 @@ namespace DatingApp.Api.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthRepository _repo;
-        public AuthController(IAuthRepository repo)
+        private readonly IConfiguration _config;
+        public AuthController(IAuthRepository repo, IConfiguration config)
         {
+            _config = config;
             _repo = repo;
         }
 
-        // // GET api/auth
-        // [HttpGet("")]
-        // public ActionResult<IEnumerable<string>> Getstrings()
-        // {
-        //     return new List<string> { };
-        // }
-
-        // // GET api/auth/5
-        // [HttpGet("{id}")]
-        // public ActionResult<string> GetstringById(int id)
-        // {
-        //     return null;
-        // }
 
         // POST api/auth/register
-[HttpPost("register")]
+        [HttpPost("register")]
         public async Task<IActionResult> Register(UserForRegisterDto userForRegisterDto)
         {
+
             userForRegisterDto.UserName = userForRegisterDto.UserName.ToLower();
 
             if (await _repo.UserExists(userForRegisterDto.UserName))
@@ -50,16 +47,38 @@ namespace DatingApp.Api.Controllers
             return StatusCode(201);
         }
 
-        // // PUT api/auth/5
-        // [HttpPut("{id}")]
-        // public void Putstring(int id, string value)
-        // {
-        // }
+        [HttpPost("login")]
+        public async Task<IActionResult> Login(UserForLoginDto userForLoginDto)
+        {
+            var userFromRepo = await _repo.Login(userForLoginDto.UserName.ToLower(), userForLoginDto.Password);
 
-        // // DELETE api/auth/5
-        // [HttpDelete("{id}")]
-        // public void DeletestringById(int id)
-        // {
-        // }
+            if (userFromRepo == null)
+                return Unauthorized();
+
+            var claims = new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, userFromRepo.Id.ToString()),
+                new Claim(ClaimTypes.Name, userFromRepo.UserName)
+            };
+
+            var key = new SymmetricSecurityKey(Encoding.UTF8
+                .GetBytes(_config.GetSection("AppSettings:Token").Value));
+            
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha512Signature);
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims), /* The subject part of the token */
+                Expires = DateTime.Now.AddDays(1), /* Expiry Stamp */
+                SigningCredentials = creds /* Securing hashed key */
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+
+            return Ok(new {
+                token = tokenHandler.WriteToken(token)
+            });
+        }
     }
 }
